@@ -2,324 +2,244 @@
 #pragma once
 
 #include <tuple>
-#include <array>
-#include <memory>
 #include <stdexcept>
 #include <type_traits>
 #include <ostream>
-#include <lars/unused.h>
 
-//#define ZERO_SIZE_STATIC_INDEX
+#ifndef FUNCTION_REQUIRES
+// Inspired by http://stackoverflow.com/questions/8743159/boostenable-if-not-in-function-signature/9220563#9220563
+#define PARENTHESIS_MUST_BE_PLACED_AROUND_RETURN_TYPE(...) __VA_ARGS__>::type
+#define FUNCTION_REQUIRES(REQUIREMENT) typename std::enable_if<(REQUIREMENT), PARENTHESIS_MUST_BE_PLACED_AROUND_RETURN_TYPE
+#endif
 
 namespace lars {
   
-struct DynamicIndex{
-  size_t value = 0;
-  constexpr DynamicIndex(){}
-  constexpr DynamicIndex(size_t _value):value(_value){}
-  operator size_t()const{ return value; }
-  constexpr static bool is_dynamic = true;
-};
-  
-template <size_t _value> struct StaticIndex{
-#ifdef ZERO_SIZE_STATIC_INDEX
-  char MAKE_SIZE_ZERO_IF_EMPTY[0];
-  operator size_t()const{ (void)(MAKE_SIZE_ZERO_IF_EMPTY[0]); /* to silence compiler */ return _value;  }
-#else
-  operator size_t()const{ return _value;  }
-#endif
-  constexpr StaticIndex(){ }
-  static const size_t value = _value;
-  constexpr static bool is_dynamic = false;
-};
-
-template <typename ... Indices> class IndexTuple;
-
-template <typename Lhs,typename Rhs,typename F> struct Reducer:public F{
-  const Lhs & lhs;
-  const Rhs & rhs;
-  
-  Reducer(const Lhs & _lhs,const Rhs & _rhs):lhs(_lhs),rhs(_rhs){ static_assert(Lhs::size() == Rhs::size(), "index tuple size doesn't match"); }
-  
-  template <size_t N,typename Enable = void> struct make_result_type;
-  
-  template <size_t N> struct make_result_type<N,typename std::enable_if<N!=0 && (Lhs::template element_is_dynamic<N-1>() || Rhs::template element_is_dynamic<N-1>())>::type>{
-    using type = typename make_result_type<N-1>::type::push_back_dynamic_type;
+  struct DynamicIndex{
+    size_t value = 0;
+    constexpr DynamicIndex(){}
+    constexpr DynamicIndex(size_t _value):value(_value){}
+    constexpr static bool is_dynamic = true;
+    void set_value(size_t v){ value = v; }
+    template<size_t v> void set_value(){ value = v; }
+    constexpr static size_t safe_static_value(){ return -1; }
+    template <class Index> DynamicIndex & operator=(const Index &idx){ set_value(idx.value); return *this; }
+    operator size_t()const{ return value; }
   };
   
-  template <size_t N> struct make_result_type<N,typename std::enable_if<N!=0 && !(Lhs::template element_is_dynamic<N-1>() || Rhs::template element_is_dynamic<N-1>())>::type>{
-    using type = typename make_result_type<N-1>::type::template push_back_static_type<F::reduce(Lhs::template get<N-1>(),Rhs::template get<N-1>())>;
-  };
-  
-  template <size_t N> struct make_result_type<N,typename std::enable_if<N==0>::type>{ using type = IndexTuple<>; };
-  
-  using result_type = typename make_result_type<Lhs::size()>::type;
-  
-  template <size_t Idx> void operator()(DynamicIndex & value){
-    value = F::reduce(lhs.template get<Idx>(),rhs.template get<Idx>());
-  }
-  
-  template <size_t Idx,size_t value> void operator()(StaticIndex<value> &){  }
-  
-};
-
-
-template <typename ... Indices> class IndexTuple:public std::tuple<Indices...>{
-
-public:
-  
-  constexpr static size_t size(){ return sizeof...(Indices); }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 < size()>::type apply_template(F & f)const{
-    f.template operator()<Idx>(std::get<Idx>(*this));
-    apply_template<Idx+1>(f);
-  }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 == size()>::type apply_template(F & f)const{
-    f.template operator()<Idx>(std::get<Idx>(*this));
-  }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 < size()>::type apply(const F & f)const{
-    f(Idx,std::get<Idx>(*this).value);
-    apply<Idx+1>(f);
-  }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 == size()>::type apply(const F & f)const{
-    f(Idx,std::get<Idx>(*this).value);
-  }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 < size()>::type apply_template(F & f){
-    f.template operator()<Idx>(std::get<Idx>(*this));
-    apply_template<Idx+1>(f);
-  }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 == size()>::type apply_template(F & f){
-    f.template operator()<Idx>(std::get<Idx>(*this));
-  }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 < size()>::type apply(const F & f){
-    f(Idx,std::get<Idx>(*this));
-    apply<Idx+1>(f);
-  }
-  
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<Idx+1 == size()>::type apply(const F & f){
-    f(Idx,std::get<Idx>(*this));
-  }
-
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<size()+0*Idx == 0>::type apply(const F & f)const{ }
-  template <size_t Idx = 0,typename F = void> typename std::enable_if<size()+0*Idx == 0>::type apply_template(F & f)const{ }
-  
-  template <size_t Idx> using ElementType = typename std::tuple_element<Idx, std::tuple<Indices...> >::type;
-  
-  template <size_t Idx> constexpr static typename std::enable_if<(Idx<size()),bool>::type element_is_dynamic(){ return std::tuple_element<Idx, std::tuple<Indices...> >::type::is_dynamic; }
-  
-  template <size_t i=size()-1> constexpr static typename std::enable_if<i != 0,bool>::type is_dynamic(){ return element_is_dynamic<i>() || is_dynamic<i-1>(); }
-  template <size_t i=size()-1> constexpr static typename std::enable_if<i == 0,bool>::type is_dynamic(){ return element_is_dynamic<i>(); }
-  
-private:
-  
-  struct mul_reduce{ constexpr static size_t reduce(size_t a,size_t b){ return a*b; } };
-  struct sum_reduce{ constexpr static size_t reduce(size_t a,size_t b){ return a+b; } };
-  struct div_reduce{ constexpr static size_t reduce(size_t a,size_t b){ return a/b; } };
-  struct dif_reduce{ constexpr static size_t reduce(size_t a,size_t b){ return a-b; } };
-  
-  template <typename Args,size_t Begin = 0> struct Setter{
-    const Args & values;
-    Setter(const Args &_values):values(_values){}
-    
-    template <size_t Idx> using enable_if_dynamic = typename std::enable_if<std::tuple_element<Idx, Args>::type::is_dynamic>::type;
-    template <size_t Idx> using enable_if_not_dynamic = typename std::enable_if<!std::tuple_element<Idx, Args>::type::is_dynamic>::type;
-    
-    template <size_t Idx>  void operator()(DynamicIndex & value)const{ value = size_t(std::get<Idx + Begin>(values)); }
-    
-    template <size_t Idx,size_t value> enable_if_dynamic<Idx> operator()(StaticIndex<value> &v)const{
+  template <size_t _value> struct StaticIndex{
+    constexpr StaticIndex(){ }
+    StaticIndex(size_t v){ set_value(v); }
+    constexpr static size_t value = _value;
+    constexpr static bool is_dynamic = false;
+    void set_value(size_t v){
 #ifndef NDEBUG
-      if(std::get<Idx + Begin>(values) != value) throw std::runtime_error("changing static index");
+      if(value != v) throw std::invalid_argument("setting static index to invalid value");
 #endif
     }
+    template<size_t v> void set_value()const{ static_assert(value == v, "setting static index to invalid value"); }
+    constexpr static size_t safe_static_value(){ return _value; }
+    template <size_t v> DynamicIndex & operator=(const StaticIndex<v> &idx){ set_value<idx.value>(); return *this; }
+    template <class Index> DynamicIndex & operator=(const Index &idx){ set_value(idx.value); return *this; }
+    operator size_t()const{ return value; }
+  };
+  
+  template <typename ... Indices> class IndexTuple:private std::tuple<Indices...>{
+  public:
+    using AsTuple = std::tuple<Indices...>;
+    using AsTuple::AsTuple;
     
-    template <size_t Idx,size_t value> enable_if_not_dynamic<Idx> operator()(StaticIndex<value> &v)const{
-      static_assert( std::tuple_element<Idx + Begin, Args>::type::value == value, "changing static index");
+    constexpr static size_t size(){ return sizeof...(Indices); }
+    
+    template <size_t i> using Element = typename std::tuple_element<i, AsTuple>::type;
+    template <size_t i> constexpr static FUNCTION_REQUIRES(i != size()) (size_t) element_is_dynamic(){ return Element<i>::is_dynamic; }
+    
+  private:
+    
+    template <size_t offset,class Tuple = IndexTuple<Indices...>> struct SetIterator{
+      Tuple * tuple;
+      template<size_t i> void evaluate(size_t v)const{ tuple->template set_value<offset+i>(v); }
+      template<size_t i,size_t v> void evaluate()const{ tuple->template set_value<offset+i,v>(); }
+    };
+    
+    template <class F,class Tuple = IndexTuple<Indices...>> struct EvaluateIterator{
+      const F * f;
+      Tuple * tuple;
+      template<size_t i> void evaluate(size_t v)const{ tuple->template set_value<i>(f->template evaluate<i>(v)); }
+      template<size_t i,size_t v> void evaluate()const{
+#ifndef NDEBUG
+        tuple->template set_value<i>(f->template evaluate<i>(v));
+#endif
+      }
+    };
+    
+  public:
+#pragma mark Getters and Setters
+    template<size_t i> size_t get()const{ return std::get<i>(*this).value; }
+    template<size_t i> constexpr static size_t static_get(){ return Element<i>::value; }
+    template<size_t i> void set_value(size_t v){ std::get<i>(*this).set_value(v); }
+    template<size_t i,size_t v> void set_value(){ std::get<i>(*this).template set_value<v>(); }
+    template<typename ... OtherIndices> void set(const IndexTuple<OtherIndices...> &other){ static_assert(size() == IndexTuple<OtherIndices...>::size(),"setting with index tuple of different size"); other.template_iterate(SetIterator<0>{this}); }
+    template<size_t ... values> void set(){ set(IndexTuple<StaticIndex<values> ...>()); }
+    template<size_t i> constexpr static size_t safe_static_get(){ return Element<i>::safe_static_value(); }
+    template <class Other> IndexTuple<Indices ...> & operator=(const Other &other){ set(other); return *this; }
+    
+#pragma mark Splitting and Slicing
+    template<typename ... OtherIndices> using AppendIndices = IndexTuple<Indices...,OtherIndices...>;
+    template<typename ... OtherIndices> using PrependIndices = IndexTuple<OtherIndices...,Indices...>;
+    template<class Other> using Append = typename Other::template PrependIndices<Indices...>;
+    template<typename ... OtherIndices> AppendIndices<OtherIndices...> append(const IndexTuple<OtherIndices...> &other){
+      AppendIndices<OtherIndices...> result;
+      template_iterate(SetIterator<0,AppendIndices<OtherIndices...>>{&result});
+      other.template_iterate(SetIterator<size(),AppendIndices<OtherIndices...>>{&result});
+      return result;
     }
+    
+  private:
+    template<size_t begin,size_t end,bool equal = begin == end> struct MakeSlice;
+    template<size_t begin,size_t end> struct MakeSlice<begin,end,false>{ using type = typename MakeSlice<begin+1,end>::type::template PrependIndices<Element<begin>>; };
+    template<size_t begin,size_t end> struct MakeSlice<begin,end,true>{ using type = IndexTuple<>; };
+    
+  public:
+    template<size_t begin,size_t end> using Slice = typename MakeSlice<begin,end>::type;
+    template<size_t begin,size_t end> Slice<begin,end> slice(){
+      auto result = Slice<begin,end>();
+      template_iterate<begin,end>(SetIterator<-begin,Slice<begin,end>>{&result});
+      return result;
+    }
+    
+#pragma mark Iteration
+    template <size_t i = 0,class F = void> FUNCTION_REQUIRES(i != size()) (void) iterate(const F &f)const{ f(i,get<i>()); iterate<i+1,F>(f); }
+    template <size_t i = 0,class F = void> FUNCTION_REQUIRES(i == size()) (void)  iterate(const F & f)const{  }
+    
+    template <size_t i = 0,size_t end = size(),class F = void> FUNCTION_REQUIRES(i != end && element_is_dynamic<i>()) (void) template_iterate(const F &f)const{ f.template evaluate<i>(get<i>()); template_iterate<i+1,end>(f); }
+    template <size_t i = 0,size_t end = size(),class F = void> FUNCTION_REQUIRES(i != end && !element_is_dynamic<i>()) (void) template_iterate(const F &f)const{ f.template evaluate<i,static_get<i>()>(); template_iterate<i+1,end>(f); }
+    template <size_t i = 0,size_t end = size(),class F = void> FUNCTION_REQUIRES(i==end) (void) template_iterate(const F &f)const{  }
+    
+#pragma mark Evaluation
+  private:
+    
+    template <class F,size_t index,bool is_dynamic> struct MakeEvaluatedElement;
+    template <class F,size_t index> struct MakeEvaluatedElement<F,index,true>{ using type = DynamicIndex; };
+    template <class F,size_t index> struct MakeEvaluatedElement<F,index,false>{ using type = StaticIndex<F::template static_evaluate<index>(static_get<index>())>; };
+    
+    template <class F,size_t index> using EvaluatedElement = typename MakeEvaluatedElement<F,index,element_is_dynamic<index>() || !F::template can_static_evaluate<index>() >::type;
+    
+    template<class F,size_t index=0> struct MakeEvaluated{
+      using type = typename MakeEvaluated<F,index+1>::type::template PrependIndices<EvaluatedElement<F,index>>;
+    };
+    
+    template<class F> struct MakeEvaluated<F,size()>{
+      using type = IndexTuple<>;
+    };
+    
+    template <class F,class Other> struct BinaryEvaluator{
+      const IndexTuple<Indices...> * self;
+      const Other * other;
+      template <size_t idx> constexpr static bool can_static_evaluate(){ return !Other::template element_is_dynamic<idx>(); }
+      template <size_t idx> constexpr static size_t static_evaluate(size_t v){ return F::evaluate(static_get<idx>(),Other::template static_get<idx>()); }
+      template <size_t idx> size_t evaluate(size_t v)const{ return F::evaluate(self->get<idx>(),other->template get<idx>()); }
+    };
+    
+    struct SumEvaluator{ constexpr static size_t evaluate(size_t a,size_t b){ return a+b; } };
+    struct DifferenceEvaluator{ constexpr static size_t evaluate(size_t a,size_t b){ return a-b; } };
+    struct ProductEvaluator{ constexpr static size_t evaluate(size_t a,size_t b){ return a*b; } };
+    struct FractionEvaluator{ constexpr static size_t evaluate(size_t a,size_t b){ return a/b; } };
+    struct EqualEvaluator{ constexpr static size_t evaluate(size_t a,size_t b){ return a==b; } };
+    struct UnequalEvaluator{ constexpr static size_t evaluate(size_t a,size_t b){ return a!=b; } };
+    struct LessEvaluator{ constexpr static size_t evaluate(size_t a,size_t b){ return a<b; } };
 
+  public:
+    template <class F> using Evaluated =typename MakeEvaluated<F>::type;
+    template <class F> Evaluated<F> evaluate(const F &f)const{
+      Evaluated<F> result;
+      template_iterate(EvaluateIterator<F,Evaluated<F>>{&f,&result});
+      return result;
+    }
+    
+    template <class Other> Evaluated<BinaryEvaluator<SumEvaluator,Other>> operator+(const Other &other)const{ return evaluate(BinaryEvaluator<SumEvaluator,Other>{this,&other}); }
+    template <class Other> Evaluated<BinaryEvaluator<DifferenceEvaluator,Other>> operator-(const Other &other)const{ return evaluate(BinaryEvaluator<DifferenceEvaluator,Other>{this,&other}); }
+    template <class Other> Evaluated<BinaryEvaluator<ProductEvaluator,Other>> operator*(const Other &other)const{ return evaluate(BinaryEvaluator<ProductEvaluator,Other>{this,&other}); }
+    template <class Other> Evaluated<BinaryEvaluator<FractionEvaluator,Other>> operator/(const Other &other)const{ return evaluate(BinaryEvaluator<FractionEvaluator,Other>{this,&other}); }
+    template <class Other> Evaluated<BinaryEvaluator<LessEvaluator,Other>> operator<(const Other &other)const{ return evaluate(BinaryEvaluator<LessEvaluator,Other>{this,&other}); }
+    template <class Other> Evaluated<BinaryEvaluator<EqualEvaluator,Other>> element_wise_equal(const Other &other)const{ return evaluate(BinaryEvaluator<EqualEvaluator,Other>{this,&other}); }
+    template <class Other> Evaluated<BinaryEvaluator<UnequalEvaluator,Other>> element_wise_unequal(const Other &other)const{ return evaluate(BinaryEvaluator<UnequalEvaluator,Other>{this,&other}); }
+
+  private:
+    template <class F,class A,class B> using ReducedResult = typename std::conditional<A::is_dynamic || B::is_dynamic, DynamicIndex, StaticIndex<F::evaluate(A::safe_static_value(),B::safe_static_value())>>::type;
+    
+    template <class F,class A,class B> FUNCTION_REQUIRES(A::is_dynamic || B::is_dynamic) (ReducedResult<F,A,B>) reduce(const A &a,const B &b){
+      DynamicIndex res;
+      res.set_value(F::evaluate(a.value,b.value));
+      return res;
+    }
+    
+    template <class F,class A,class B> FUNCTION_REQUIRES(!(A::is_dynamic || B::is_dynamic)) (ReducedResult<F,A,B>) reduce(const A &a,const B &b){ return ReducedResult<F,A,B>(); }
+    
+    template <class F,size_t idx> struct MakeReduced{
+      using type = ReducedResult<F, typename MakeReduced<F,idx-1>::type , Element<idx-1> >;
+      
+      static type evaluate(IndexTuple<Indices...> * parent){ type result; result.set_value(F::evaluate(MakeReduced<F,idx-1>::evaluate(parent),parent->get<idx-1>())); return result; }
+    };
+    
+    template <class F> struct MakeReduced<F,1>{
+      using type = Element<0>;
+      static type evaluate(IndexTuple<Indices...> * parent){ return std::get<0>(*parent); }
+    };
+    
+    template <class F> struct MakeReduced<F,0>{
+      using type = StaticIndex<0>;
+      static type evaluate(IndexTuple<Indices...> * parent){ return type(); }
+    };
+    
+  public:
+    template <class F> using ReducedType = typename MakeReduced<F, size() >::type;
+    ReducedType<SumEvaluator> sum(){ return MakeReduced<SumEvaluator, size() >::evaluate(this); }
+    ReducedType<ProductEvaluator> product(){ return MakeReduced<ProductEvaluator, size() >::evaluate(this); }
+    
+    template <typename ... OtherIndices> bool operator==(const IndexTuple<OtherIndices...> &other)const{ return element_wise_unequal(other).sum() == 0; }
+    template <typename ... OtherIndices> bool operator!=(const IndexTuple<OtherIndices...> &other)const{ return element_wise_unequal(other).sum() != 0; }
+    
   };
   
-  template <size_t Idx,class Ret> using enable_if_dynamic = typename std::enable_if<std::tuple_element<Idx, std::tuple<Indices...>>::type::is_dynamic,Ret>::type;
-  template <size_t Idx,class Ret> using enable_if_not_dynamic = typename std::enable_if<(!std::tuple_element<Idx, std::tuple<Indices...>>::type::is_dynamic),Ret>::type;
-
-public:
-  
-  IndexTuple(){}
-  
-  template <typename ... Args> IndexTuple(const IndexTuple<Args...> &other){ set(other); }
-  template <typename ... Args> IndexTuple(Args ... args){ set(args...); }
-  
-  template <typename ... Args> void set(const std::tuple<Args...> &args){
-    static_assert(sizeof...(Args) == size(), "index tuple size doesn't match size");
-    Setter<std::tuple<Args...>> value_setter(args);
-    apply_template(value_setter);
-  }
-
-  template <typename ... Args> IndexTuple & operator=(const IndexTuple<Args...> &other){
-    set((const std::tuple<Args...> &)other);
-    return *this;
-  }
-  
-  template <typename F,typename Rhs> typename Reducer<IndexTuple<Indices...>,Rhs,F>::result_type reduce(Rhs rhs)const{
-    typename Reducer<IndexTuple<Indices...>,Rhs,F>::result_type result;
-    Reducer<IndexTuple<Indices...>,Rhs,F> Reducer(*this,rhs);
-    result.apply_template(Reducer);
-    return result;
-  }
-  
-  template <typename ... Args> void set(size_t first, Args ... args){ set(std::make_tuple( DynamicIndex(first), DynamicIndex(args) ...) ); }
-  
-  template <size_t Idx> void set(size_t value){ std::get<Idx>(*this) = value; }
-  template <size_t ... Idx> void set(){ set(std::make_tuple( StaticIndex<Idx>() ... ) ); }
-  
-  template <size_t Idx> enable_if_dynamic<Idx, size_t> get()const{ return std::get<Idx>(*this).value; }
-  template <size_t Idx> enable_if_not_dynamic<Idx, size_t> static constexpr get(){ return std::tuple_element<Idx, std::tuple<Indices...> >::type::value; }
-
-
-  template <size_t Idx> struct ValidGetter{ const size_t value = IndexTuple::get<Idx>(); };
-  template <size_t Idx> struct OutOfRangeGetter{ const size_t value = 0; };
-  
-  template <typename> struct make_append;
-  template <typename... OtherIndices> struct make_append<IndexTuple<OtherIndices...>> { using type = IndexTuple<Indices..., OtherIndices...>; };
-  template <typename Other> using append_type = typename make_append<Other>::type;
-  
-  template <typename... OtherIndices> IndexTuple<Indices...,OtherIndices...> append(const IndexTuple<OtherIndices...> &other)const{
-    IndexTuple<Indices...,OtherIndices...> res;
-    res.set(std::tuple_cat( std::tuple<Indices...>(*this) , std::tuple<OtherIndices...>(other) ));
-    return res;
-  }
-  
-  template <size_t B,size_t E,typename Enable = void> struct make_slice;
-  template <size_t B,size_t E> struct make_slice<B,E,typename std::enable_if<B == E>::type>{ using type = IndexTuple<>; };
-  template <size_t B,size_t E> struct make_slice<B,E,typename std::enable_if<B < E>::type>{ using type = typename IndexTuple<ElementType<B>>::template append_type<typename make_slice<B+1,E>::type>; };
-  template <size_t B,size_t E> using Slice = typename make_slice<B, E>::type;
-  
-  template <size_t Begin, size_t End, typename Args> void set_from_arg_range(const Args &args){
-    static_assert(End - Begin == size(), "invalid range");
-    Setter<Args,Begin> value_setter(args);
-    apply_template(value_setter);
-  }
-  
-  template <size_t B,size_t E> Slice<B,E> slice()const{
-    typename make_slice<B,E>::type res;
-    res.template set_from_arg_range<B,E>( std::tuple<Indices...>(*this) );
-    return res;
-  }
-
-  template<typename I> using push_back_type = IndexTuple<Indices..., I >;
-  template<size_t N> using push_back_static_type = IndexTuple<Indices..., StaticIndex<N> >;
-  using push_back_dynamic_type = IndexTuple<Indices..., DynamicIndex>;
-  
-  template<typename I> using push_front_type = IndexTuple< I, Indices... >;
-  template<size_t N> using push_front_static_type = IndexTuple<StaticIndex<N>, Indices... >;
-  using push_front_dynamic_type = IndexTuple<DynamicIndex,Indices...>;
-  
-  template <size_t value> push_back_static_type<value> push_back(){ return append(IndexTuple<StaticIndex<1>>()); }
-  push_back_dynamic_type push_back(size_t value){ return append(IndexTuple<DynamicIndex>(value)); }
-  
-  template <size_t value> push_front_static_type<value> push_front(){ return IndexTuple<StaticIndex<1>>().append(*this); }
-  push_front_dynamic_type push_front(size_t value){ return IndexTuple<DynamicIndex>(value).append(*this); }
-  
-  template <class Red, typename Other> using reduced_result = typename Reducer<IndexTuple<Indices...>,Other,Red>::result_type;
-  
-  template <typename Other> using sum_result = reduced_result<sum_reduce, Other>;
-  template <typename Other> using mul_result = reduced_result<mul_reduce, Other>;
-  template <typename Other> using dif_result = reduced_result<dif_reduce, Other>;
-  template <typename Other> using div_result = reduced_result<div_reduce, Other>;
-  
-  
-  template <size_t Idx,typename ... OtherIndices> typename std::enable_if<Idx != 0,bool>::type is_equal(const IndexTuple<OtherIndices...> &other)const{
-    return get<Idx>() == other.template get<Idx>() && is_equal<Idx-1>(other);
-  }
-  
-  template <size_t Idx,typename ... OtherIndices> typename std::enable_if<Idx == 0,bool>::type is_equal(const IndexTuple<OtherIndices...> &other)const{
-    return get<Idx>() == other.template get<Idx>();
-  }
-  
-  template <typename ... OtherIndices> bool operator==(const IndexTuple<OtherIndices...> &other)const{
-    return is_equal<size()-1>(other);
-  }
-  
-  template <typename ... OtherIndices> bool operator!=(const IndexTuple<OtherIndices...> &other)const{
-    return !is_equal<size()-1>(other);
-  }
-  
-  template <typename ... OtherIndices> sum_result<IndexTuple<OtherIndices...>> operator+(const IndexTuple<OtherIndices...> &other)const{
-    return reduce<sum_reduce>(other);
-  }
-  
-  template <typename ... OtherIndices> dif_result<IndexTuple<OtherIndices...>> operator-(const IndexTuple<OtherIndices...> &other)const{
-    return reduce<dif_reduce>(other);
-  }
-  
-  template <typename ... OtherIndices> mul_result<IndexTuple<OtherIndices...>> operator*(const IndexTuple<OtherIndices...> &other)const{
-    return reduce<mul_reduce>(other);
-  }
-  
-  template <typename ... OtherIndices> div_result<IndexTuple<OtherIndices...>> operator/(const IndexTuple<OtherIndices...> &other)const{
-    return reduce<div_reduce>(other);
-  }
-  
-  template <size_t Idx> struct IndexIfInvalid{ template <size_t I2> static constexpr size_t get(){ return 0; } };
-  template <size_t Idx> struct IndexIfValid{
-    template <size_t I2> static constexpr enable_if_not_dynamic<I2, size_t> get(){ return IndexTuple::get<Idx>(); }
-    template <size_t I2> static constexpr enable_if_dynamic<I2, size_t> get(){ return 0; }
-  };
-  
-  template <size_t Idx> constexpr static size_t safe_static_get(){
-    return std::conditional<Idx < size(), IndexIfValid<Idx>, IndexIfInvalid<Idx>>::type::template get<Idx>();
-  }
-  
-  template <size_t Idx> typename std::enable_if<Idx < size(),size_t>::type safe_get()const{
-    return get<Idx>();
-  }
-  
-  template <size_t Idx> typename std::enable_if<Idx >= size(),size_t>::type safe_get()const{
-    return 0;
-  }
-  
-  };
-  
-  template <size_t ... Indices> using StaticIndexTuple = IndexTuple<StaticIndex<Indices> ...>;
-  
-  template <size_t N> struct make_dynamic_index_tuple_type{ using type = typename make_dynamic_index_tuple_type<N-1>::type::push_back_dynamic_type; };
-  template <> struct make_dynamic_index_tuple_type<0>{ using type = IndexTuple<>; };
-  template <size_t N> using DynamicIndexTuple = typename make_dynamic_index_tuple_type<N>::type;
-  template <typename ... Args> DynamicIndexTuple<sizeof...(Args)> make_dynamic_index_tuple(Args ... args){ return DynamicIndexTuple<sizeof...(Args)>(args...); }
-  
-  template <typename ... Indices> std::ostream & operator<<(std::ostream &stream, const IndexTuple<Indices...> & idx){
+  template <typename ... Indices> std::ostream &operator<<(std::ostream &stream,const IndexTuple<Indices...> index_tuple){
     stream << '(';
-    idx.apply([&](size_t i,size_t val){ stream << val; if(i+1 != idx.size()) stream << ','; });
+    index_tuple.iterate([&](size_t i,size_t v){ stream << v; if(i+1 != index_tuple.size()) stream << ','; });
     stream << ')';
     return stream;
   }
   
-  template <size_t N> struct make_index_tuple_range{ using type = typename make_index_tuple_range<N-1>::type::template make_append<IndexTuple<StaticIndex<N-1>>>::type; };
-  template <> struct make_index_tuple_range<0>{ using type = IndexTuple<>; };
-  template <size_t N> using IndexTupleRange = typename make_index_tuple_range<N>::type;
-  
-  template <typename IndexTupleT,size_t N = IndexTupleT::size()> struct make_reverse_index_tuple{
-    using current = IndexTuple<typename IndexTupleT::template ElementType<N-1>>;
-    using rest = typename make_reverse_index_tuple<IndexTupleT,N-1>::type;
-    using type = typename current::template make_append<rest>::type;
-    static type reverse(IndexTupleT tuple){ return current(tuple.template get<N-1>()).append(make_reverse_index_tuple<IndexTupleT,N-1>::reverse(tuple)); }
+  struct IndexTupleUnaryIterator{
+    template<size_t i> void evaluate(size_t v)const{ std::cout << "dynamic value: " << v << std::endl; }
+    template<size_t i,size_t v> void evaluate()const{ std::cout << "static value: " << v << std::endl; }
   };
-  template <typename IndexTupleT> struct make_reverse_index_tuple<IndexTupleT,0>{ using type = IndexTuple<>; static type reverse(IndexTupleT tuple){ return type(); } };
-  template <typename IndexTupleT> using ReversedIndexTuple = typename make_reverse_index_tuple<IndexTupleT>::type;
-  template <typename IndexTupleT> ReversedIndexTuple<IndexTupleT> reverse(IndexTupleT tuple){ return make_reverse_index_tuple<IndexTupleT>::reverse(tuple); }
   
-  template <size_t V,size_t N> struct make_index_tuple_repeat{ using type = typename make_index_tuple_repeat<V,N-1>::type::template make_append<IndexTuple<StaticIndex<V>>>::type; };
-  template <size_t V> struct make_index_tuple_repeat<V,0>{ using type = IndexTuple<>; };
-  template <size_t V,size_t N> using IndexTupleRepeat = typename make_index_tuple_repeat<V,N>::type;
-
-  template <size_t N> using IndexTupleZeros = typename make_index_tuple_repeat<0,N>::type;
-  template <size_t N> using IndexTupleOnes = typename make_index_tuple_repeat<1,N>::type;
+  struct SquaredEvaluator{
+    template <size_t idx> constexpr static bool can_static_evaluate(){ return true; }
+    template <size_t idx> constexpr static size_t static_evaluate(size_t v){ return v*v; }
+    template <size_t idx> size_t evaluate(size_t v)const{ return v*v; }
+  };
   
+  namespace index_tuple_creators {
+    template <size_t size> struct MakeDynamicIndexTuple{ using type = IndexTuple<DynamicIndex>::Append<typename MakeDynamicIndexTuple<size-1>::type>; };
+    template <> struct MakeDynamicIndexTuple<0>{ using type = IndexTuple<>; };
+    
+    template <size_t size> struct MakeRangeIndexTuple{ using type = typename MakeRangeIndexTuple<size-1>::type::template Append<IndexTuple<StaticIndex<size-1>>>; };
+    template <> struct MakeRangeIndexTuple<0>{ using type = IndexTuple<>; };
+    
+    template <size_t size,class I> struct MakeCopyIndexTuple{ using type = typename MakeCopyIndexTuple<size-1,I>::type::template Append<IndexTuple<I>>; };
+    template <class I> struct MakeCopyIndexTuple<0,I>{ using type = IndexTuple<>; };
+  }
+  
+  template <size_t ... indices> using StaticIndexTuple = IndexTuple<StaticIndex<indices> ... >;
+  template <size_t size> using DynamicIndexTuple = typename index_tuple_creators::MakeDynamicIndexTuple<size>::type;
+  template <size_t size> using RangeIndexTuple = typename index_tuple_creators::MakeRangeIndexTuple<size>::type;
+  template <size_t size,class I> using CopyIndexTuple = typename index_tuple_creators::MakeCopyIndexTuple<size,I>::type;
+  template <size_t v,size_t size> using IndexTupleRepeat = typename index_tuple_creators::MakeCopyIndexTuple<size,StaticIndex<v>>::type;
+  
+  template <typename ... Args> DynamicIndexTuple<sizeof...(Args)> make_dynamic_index_tuple(Args ... args){
+    DynamicIndexTuple<sizeof...(Args)> tuple(args...);
+    return tuple;
+  }
   
   
 }

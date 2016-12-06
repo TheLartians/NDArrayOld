@@ -121,7 +121,7 @@ namespace lars{
       }
       
       template <size_t Idx,size_t value> typename std::enable_if<!Shape::template ElementType<Idx>::is_dynamic>::type operator()(const StaticIndex<value> &v)const{
-        static_assert( value < Shape::template get<Idx>(), "invalid array index" );
+        static_assert( value < Shape::template static_get<Idx>(), "invalid array index" );
       }
       
       template <size_t Idx,size_t value> typename std::enable_if<Shape::template ElementType<Idx>::is_dynamic>::type operator()(const StaticIndex<value> &v)const{
@@ -190,7 +190,7 @@ namespace lars{
       return data()[get_data_index(idx)];
     }
     
-    template <typename Pos,typename Sha,typename Ste= IndexTupleRepeat<1, Shape::size()>> using Slice = NDArray<T,Sha, typename Stride::template mul_result<Ste>, DynamicIndex, BorrowedData<T> >;
+    template <typename Pos,typename Sha,typename Ste = IndexTupleRepeat<1, Shape::size()>> using Slice = NDArray<T,Sha, typename Stride::template mul_result<Ste>, DynamicIndex, BorrowedData<T> >;
     template <typename Pos,typename Sha,typename Ste = IndexTupleRepeat<1, Shape::size()>> using ConstSlice = NDArray<const T,Sha, typename Stride::template mul_result<Ste>, DynamicIndex, BorrowedData<const T> >;
     
     template <typename Pos,typename Sha,typename Ste = IndexTupleRepeat<1, Shape::size()>> Slice<Pos,Sha,Ste> slice(Pos pos,Sha shape,Ste step = IndexTupleRepeat<1, Shape::size()>()){
@@ -915,15 +915,15 @@ namespace lars{
   template <class T,typename Shape,class Creator> class StackNDArray;
   
   template <class T,typename Shape,class Creator = BasicNDArrayCreator<StackNDArray>> class StackNDArray:public Creator::template
-  NDArray<T,Shape, typename NDArrayCalculator<Shape>::Stride, StaticIndex<0>,StackData<T, NDArrayCalculator<Shape>::Prod::template get<0>() > >{
+  NDArray<T,Shape, typename NDArrayCalculator<Shape>::Stride, StaticIndex<0>,StackData<T, NDArrayCalculator<Shape>::Prod::template static_get<0>() > >{
   public:
     
-    using Base = typename Creator::template NDArray<T,Shape, typename NDArrayCalculator<Shape>::Stride, StaticIndex<0>,StackData<T, NDArrayCalculator<Shape>::Prod::template get<0>() > >;
+    using Base = typename Creator::template NDArray<T,Shape, typename NDArrayCalculator<Shape>::Stride, StaticIndex<0>,StackData<T, NDArrayCalculator<Shape>::Prod::template static_get<0>() > >;
     
     using Base::operator=;
     using Base::Base;
     
-    template <typename ... Args, class E = typename std::enable_if<sizeof...(Args) + 1 == NDArrayCalculator<Shape>::Prod::template get<0>()>::type>
+    template <typename ... Args, class E = typename std::enable_if<sizeof...(Args) + 1 == NDArrayCalculator<Shape>::Prod::template static_get<0>()>::type>
     StackNDArray(const T &first, Args ... args):Base(Shape(),NDArrayCalculator<Shape>::stride(Shape()),StaticIndex<0>(),std::array<T,NDArrayCalculator<Shape>::Prod::template get<0>()>{{first,static_cast<T>(args)...}}){
       // static_assert(sizeof...(args) + 1 == NDArrayCalculator<Shape>::Prod::template get<0>(),"initialization arguments must match array size");
     }
